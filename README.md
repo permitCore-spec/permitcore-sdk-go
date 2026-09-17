@@ -31,7 +31,7 @@ VCS/tag-based, not served from a central package registry like npm or PyPI.)
 import "github.com/permitCore-spec/permitcore-sdk-go"
 
 client := permitcore.New("https://api.permitcore.dev")
-result := client.Validate("PERMIT-XXXX-XXXX-XXXX-XXXX", "")
+result := client.Validate("PERMIT-XXXX-XXXX-XXXX-XXXX", "", "")
 
 if !result.IsValid {
 	log.Fatalf("License invalid: %s", result.Message)
@@ -50,10 +50,11 @@ if result.IsTrial {
 ## Validate
 
 ```go
-result := client.Validate(licenseKey, "2.3.1") // version is optional — pass "" to omit
+result := client.Validate(licenseKey, "2.3.1", "") // version and expectedProductID are optional — pass "" to omit
 
 // result.IsValid                  bool
 // result.ProductName              string
+// result.ProductID                string  (the license's real product GUID — always present when found)
 // result.RemainingActivations     *int
 // result.ExpiresAt                string  (ISO 8601)
 // result.Features                 []string
@@ -66,7 +67,7 @@ result := client.Validate(licenseKey, "2.3.1") // version is optional — pass "
 // result.VendorWarning            string
 // result.Message                  string
 // result.IsOffline                bool  (true when served from local cache)
-// result.ErrorCode                string (stable machine-readable reason, e.g. "NotFound")
+// result.ErrorCode                string (stable machine-readable reason, e.g. "NotFound", "WrongProduct")
 ```
 
 `Validate` never consumes an activation slot. It falls back to the local disk cache when the
@@ -76,6 +77,13 @@ server is unreachable, as long as the license has an offline grace period config
 `Validate`/`Activate` never return a Go `error` — a network failure and a rejected key both
 come back as a `*LicenseResult` with `IsValid == false`, so there's only one branch to check.
 
+**Product scoping**: `Validate`/`Activate` find a key purely by the key itself — by default, any
+active key belonging to your tenant validates successfully, regardless of which of your products
+it was actually issued for. If your app should only accept keys issued for *this* product, either
+check `result.ProductID` yourself, or pass `expectedProductID` and let the server reject a
+mismatch for you (`result.ErrorCode == "WrongProduct"`). Pass `""` to omit. Find your product's ID
+in the Admin panel under Products (or on a license's own detail page).
+
 ---
 
 ## Activate
@@ -83,9 +91,10 @@ come back as a `*LicenseResult` with `IsValid == false`, so there's only one bra
 ```go
 result := client.Activate(
 	licenseKey,
-	"",                  // deviceId — auto-generated HWID when empty
-	"Production Server #1", // deviceName
-	"2.3.1",             // version, optional
+	"",                      // deviceId — auto-generated HWID when empty
+	"Production Server #1",  // deviceName
+	"2.3.1",                 // version, optional — pass "" to omit
+	"",                      // expectedProductID, optional — pass "" to omit
 )
 
 if !result.IsValid {
@@ -181,7 +190,7 @@ device ID instead of license key).
 ## Version enforcement
 
 ```go
-result := client.Validate(licenseKey, "")
+result := client.Validate(licenseKey, "", "")
 
 myVersion := "2.3.0"
 if result.MinVersion != "" && myVersion < result.MinVersion {
@@ -201,7 +210,7 @@ schemes; use a real semver package if you need more).
 ## Offline grace pattern
 
 ```go
-result := client.Validate(licenseKey) // falls back to cache automatically
+result := client.Validate(licenseKey, "", "") // falls back to cache automatically
 
 if !result.IsValid {
 	log.Fatalf("License invalid: %s", result.Message)
@@ -234,6 +243,7 @@ client := permitcore.New("https://api.permitcore.dev", permitcore.Options{
 |---|---|---|
 | `IsValid` | `bool` | True if the license is active and valid |
 | `ProductName` | `string` | Product the license belongs to |
+| `ProductID` | `string` | GUID of the product the license belongs to. Always present when the key was found, regardless of whether `expectedProductID` was passed |
 | `RemainingActivations` | `*int` | Slots left before MaxActivations is reached |
 | `ExpiresAt` | `string` | Expiry date (ISO 8601 UTC), empty if perpetual |
 | `Features` | `[]string` | Feature flag list, e.g. `["export", "api"]` |

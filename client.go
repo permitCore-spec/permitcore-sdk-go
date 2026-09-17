@@ -5,7 +5,7 @@
 // Quick start:
 //
 //	client := permitcore.New("https://api.permitcore.dev")
-//	result := client.Validate("PERMIT-XXXX-XXXX-XXXX-XXXX", "")
+//	result := client.Validate("PERMIT-XXXX-XXXX-XXXX-XXXX", "", "")
 //
 //	if result.IsValid {
 //		fmt.Println("Valid! Product:", result.ProductName)
@@ -63,12 +63,16 @@ func New(baseURL string, opts ...Options) *Client {
 
 // Validate validates a license key. Does NOT consume an activation slot. version is optional
 // (pass "" to omit) — lets the server enforce MinVersion/MaxVersion restrictions on the
-// license. Falls back to the local disk cache when the server is unreachable, as long as the
-// license has an offline grace period configured.
-func (c *Client) Validate(licenseKey string, version string) *LicenseResult {
+// license. expectedProductID is optional (pass "" to omit) — lets the server reject the key if
+// it doesn't belong to this product. Falls back to the local disk cache when the server is
+// unreachable, as long as the license has an offline grace period configured.
+func (c *Client) Validate(licenseKey string, version string, expectedProductID string) *LicenseResult {
 	body := map[string]string{"licenseKey": licenseKey}
 	if version != "" {
 		body["version"] = version
+	}
+	if expectedProductID != "" {
+		body["expectedProductId"] = expectedProductID
 	}
 
 	var result LicenseResult
@@ -87,8 +91,9 @@ func (c *Client) Validate(licenseKey string, version string) *LicenseResult {
 
 // Activate validates AND activates the key on this device. Call only once per installation —
 // use Validate on every later launch. deviceID defaults to GetHardwareID() when empty.
-// version is optional, same meaning as Validate's.
-func (c *Client) Activate(licenseKey string, deviceID string, deviceName string, version string) *LicenseResult {
+// version is optional, same meaning as Validate's. expectedProductID is optional (pass "" to
+// omit) — lets the server reject the key if it doesn't belong to this product.
+func (c *Client) Activate(licenseKey string, deviceID string, deviceName string, version string, expectedProductID string) *LicenseResult {
 	hwid := deviceID
 	if hwid == "" {
 		hwid = GetHardwareID()
@@ -113,6 +118,9 @@ func (c *Client) Activate(licenseKey string, deviceID string, deviceName string,
 	}
 	if version != "" {
 		body["version"] = version
+	}
+	if expectedProductID != "" {
+		body["expectedProductId"] = expectedProductID
 	}
 
 	var result LicenseResult

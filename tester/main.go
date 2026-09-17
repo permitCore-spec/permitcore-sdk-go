@@ -162,7 +162,7 @@ func main() {
 				continue
 			}
 			fmt.Println("  Validating...")
-			r := permitcore.New(apiURL).Validate(licenseKey, "")
+			r := permitcore.New(apiURL).Validate(licenseKey, "", "")
 			printResult(r)
 			pressEnter()
 
@@ -177,7 +177,7 @@ func main() {
 			}
 			fmt.Println("  Activating...")
 			host, _ := os.Hostname()
-			r := permitcore.New(apiURL).Activate(licenseKey, "", host, "")
+			r := permitcore.New(apiURL).Activate(licenseKey, "", host, "", "")
 			printResult(r)
 			pressEnter()
 
@@ -189,7 +189,7 @@ func main() {
 			}
 			fmt.Println("  Loading from offline cache (no server contact)...")
 			c := permitcore.New("http://0.0.0.0:1", permitcore.Options{Timeout: 1 * time.Second})
-			r := c.Validate(licenseKey, "")
+			r := c.Validate(licenseKey, "", "")
 			printResult(r)
 			if !r.IsOffline && !r.IsValid {
 				warn("  No offline cache found. Validate/Activate first to seed the cache.")

@@ -28,6 +28,11 @@ type LicenseResult struct {
 	// "SeatsExhausted", "Expired") — empty on success. Message stays free-text for display;
 	// branch on this for programmatic logic instead, since message wording may change.
 	ErrorCode string `json:"errorCode,omitempty"`
+	// ProductID is the product this license actually belongs to. Always present when a license
+	// was found, regardless of whether you passed expectedProductId to Validate/Activate — empty
+	// only when the key itself wasn't found. Compare this yourself, or pass expectedProductID, to
+	// confirm a valid key belongs to the specific product you expect.
+	ProductID string `json:"productId,omitempty"`
 }
 
 // HasFeature reports whether the license includes the given feature flag (case-insensitive).
