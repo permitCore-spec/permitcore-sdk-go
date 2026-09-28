@@ -9,8 +9,17 @@ Official Go client for [PermitCore](https://permitcore.dev) license management.
 
 ## Installation
 
-This SDK isn't published as a tagged Go module yet — download it as a source ZIP (Admin panel
-→ SDKs, or `GET /api/sdks/go`), extract it, then add a `replace` directive to your own
+Published as a real, tagged Go module:
+
+```
+go get github.com/permitCore-spec/permitcore-sdk-go@v1.1.0
+```
+
+Go modules are VCS/tag-based, not served from a central package registry like npm or PyPI — this
+tagged repository *is* the registry, no separate publish step needed.
+
+Working from a local source ZIP instead (Admin panel → SDKs, or `GET /api/sdks/go` — e.g. for
+local edits before a real release)? Extract it, then add a `replace` directive to your own
 `go.mod` pointing at the extracted folder:
 
 ```
@@ -18,10 +27,6 @@ require github.com/permitCore-spec/permitcore-sdk-go v0.0.0
 
 replace github.com/permitCore-spec/permitcore-sdk-go => ./permitcore-sdk-go
 ```
-
-(Once this module is pushed to a real, tagged repository, `go get
-github.com/permitCore-spec/permitcore-sdk-go` will work directly — Go modules are
-VCS/tag-based, not served from a central package registry like npm or PyPI.)
 
 ---
 
