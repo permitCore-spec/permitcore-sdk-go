@@ -12,7 +12,7 @@ Official Go client for [PermitCore](https://permitcore.dev) license management.
 Published as a real, tagged Go module:
 
 ```
-go get github.com/permitCore-spec/permitcore-sdk-go@v1.1.0
+go get github.com/permitCore-spec/permitcore-sdk-go@v1.2.0
 ```
 
 Go modules are VCS/tag-based, not served from a central package registry like npm or PyPI — this
@@ -278,3 +278,17 @@ shared, language-agnostic cross-SDK protocol vectors in `../test-vectors/vectors
 ECDSA P-256/SHA-256 tokens every PermitCore SDK verifies identically — see that file's own
 `schemaNote`) and checks the `validate`/`activate` request bodies this SDK builds match the
 shared `requestShapes` key sets exactly.
+
+## Store subscription payment status (1.2.0)
+
+Online validate/activate results include `paymentStatus` (`active`, `past_due`, `unpaid`,
+`canceled`, or null/empty for other licenses) and `isInGracePeriod`. Use the language's normal
+field naming (`PaymentStatus`/`IsInGracePeriod`, `payment_status`/`is_in_grace_period`, or
+camelCase). Show a card-update notice for `past_due` or `unpaid` while `isValid` is true.
+Paid renewals extend the same key to Stripe's paid billing-period end. Default payment grace is
+14 days from paid-through, configurable in Store settings and overridable per license.
+Access expires at the grace deadline; an ended subscription revokes the license.
+
+Signed offline cache tokens are capped at paid-through plus grace and refreshed on successful
+online validation after payment. An offline cached result cannot discover a payment-state change;
+reconnect for current payment metadata. The signed deadline remains authoritative offline.

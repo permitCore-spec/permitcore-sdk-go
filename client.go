@@ -23,6 +23,9 @@ import (
 	"time"
 )
 
+// Version is this SDK release; module releases also use the matching v1.2.0 git tag.
+const Version = "1.2.0"
+
 const userAgent = "PermitCore-Go/1.0"
 
 // Client is the official PermitCore Go SDK client. Safe for concurrent use — it holds no
