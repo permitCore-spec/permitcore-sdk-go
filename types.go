@@ -13,6 +13,8 @@ type LicenseResult struct {
 	Message              string            `json:"message,omitempty"`
 	CustomFields         map[string]string `json:"customFields,omitempty"`
 	VendorWarning        string            `json:"vendorWarning,omitempty"`
+	PaymentStatus        string            `json:"paymentStatus,omitempty"`
+	IsInGracePeriod       bool              `json:"isInGracePeriod,omitempty"`
 	Features             []string          `json:"features,omitempty"`
 	IsTrial              bool              `json:"isTrial,omitempty"`
 	TrialDaysRemaining   *int              `json:"trialDaysRemaining,omitempty"`
