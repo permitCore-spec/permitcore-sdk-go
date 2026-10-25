@@ -47,7 +47,7 @@ type graceVector struct {
 
 func loadVectors(t *testing.T) *vectorFile {
 	t.Helper()
-	path := filepath.Join("..", "test-vectors", "vectors.json")
+	path := testVectorPath("vectors.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("shared test-vector file not found at %s: %v", path, err)
@@ -204,4 +204,12 @@ func derefStr(s *string) string {
 		return "<nil>"
 	}
 	return *s
+}
+
+func testVectorPath(name string) string {
+	local := filepath.Join("test-vectors", name)
+	if _, err := os.Stat(local); err == nil {
+		return local
+	}
+	return filepath.Join("..", "test-vectors", name)
 }

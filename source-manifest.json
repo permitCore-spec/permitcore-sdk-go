@@ -1,0 +1,25 @@
+{
+  "sdk": "go",
+  "version": "2.1.1",
+  "sourceCommit": "3b695c0f6bcb8421c5dd8f764b959153e9481a25",
+  "sha256": {
+    "README.md": "e3c49d6c33cd75b409dd2563fdaa39f7098edc88d5e7f7549c9728915f6a006c",
+    "cache.go": "8a2bc7f2bcfa74f5c9e8b75266fa9f42df336cde20dd88dcd8fa5184cd83b03b",
+    "cache_trust_test.go": "0c90f27b8c0e36751b9d9bec157dbefe8e9cd6c458a128371b9cdea68000b6d9",
+    "client.go": "df9ad4885ec810626085c9cd9c6eb4ae2a9a559d77f38977492bb32f19320c25",
+    "feature_contract_test.go": "92f7bad62bec1bdfe5eab6d96a34011c2a2224f077eff1c0565dc9dc22ab0e42",
+    "floating_contract_test.go": "c8f070c8f85047f9f0aa0834c0ddb3b274203a17a1139470907b921c97fd6a11",
+    "go.mod": "3a7fc59ad78a6bd82293266d0496b12d64f5a97bc3ac480f2936d1b701e2e3e4",
+    "http_authority_test.go": "324cdd3a1cf851bcb6ae2d06b8cb01d8b349109d8b72291006cf631f18250f48",
+    "hwid.go": "7938d6004a0de4df2e23b818431988f85b2fc18fa681c5e6722bd8f0cdd6c558",
+    "offline.go": "ca75495596ceac0e34722afc70c523359f1e3e4703d4da7c657d7ddb7e15991a",
+    "payment_status_test.go": "748e2005ff2ae061ffa29f32aff54ddbdddf924da5d03528270bb2b18f3e6913",
+    "product_scoping_test.go": "aea53760083c39ad950f36787f68226f417588581950b5b67da2e0fbf8ed1872",
+    "test-vectors/http-contract.json": "a05cd850ce9ea10f5d0e2b3940c269dda162edff89dd4469d726fbab608c9e1e",
+    "test-vectors/vectors.json": "6bbd8c58d682b6e7482fe6ee70d8fdc4f387a324159543b976084660d8f88447",
+    "tester/main.go": "f4cf5691f7fe1bd275ee8b2c7e60e6db9caf0d4464a7d98c814c5ebcb0231fd3",
+    "transport_contract_test.go": "3443d7a9bbe943ee2ee752dad8c3d7087945a682728e62d2b3fa354d298ae91e",
+    "types.go": "da654fb00532f29dd4b1d7019ad886dccbf9e7195addc0a5e0215d30340de3d0",
+    "vectors_test.go": "4e243917e23c5ffeb02e3bde4282776029e73188cea775e3081f684dcc020bed"
+  }
+}

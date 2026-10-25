@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	permitcore "github.com/permitCore-spec/permitcore-sdk-go"
+	permitcore "github.com/permitCore-spec/permitcore-sdk-go/v2"
 )
 
 var (

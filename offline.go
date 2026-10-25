@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 )
@@ -49,10 +50,9 @@ func VerifyOfflineToken(token string, publicKeyBase64Spki string) *OfflineTokenR
 		return &OfflineTokenResult{IsValid: false, Message: "Invalid or corrupt token."}
 	}
 
-	if payload.ExpiresAt != "" {
-		if expiry, err := time.Parse(time.RFC3339, payload.ExpiresAt); err == nil && expiry.Before(time.Now().UTC()) {
-			return &OfflineTokenResult{IsValid: false, Message: "Token expired.", Payload: &payload}
-		}
+	expiry, err := time.Parse(time.RFC3339, payload.ExpiresAt)
+	if payload.Version != 1 || err != nil || !expiry.After(time.Now().UTC()) {
+		return &OfflineTokenResult{Message: "Token expired or malformed."}
 	}
 
 	return &OfflineTokenResult{IsValid: true, Message: "Valid.", Payload: &payload}
@@ -85,56 +85,50 @@ func VerifyGraceCacheToken(token string, publicKeyBase64Spki string) *GraceCache
 		return &GraceCacheResult{IsValid: false, Message: "Invalid or corrupt token."}
 	}
 
-	if payload.ValidUntil != "" {
-		if expiry, err := time.Parse(time.RFC3339, payload.ValidUntil); err == nil && expiry.Before(time.Now().UTC()) {
-			return &GraceCacheResult{IsValid: false, Message: "Grace period expired.", Payload: &payload}
-		}
+	expiry, err := time.Parse(time.RFC3339, payload.ValidUntil)
+	if payload.Version != 1 || err != nil || !expiry.After(time.Now().UTC()) {
+		return &GraceCacheResult{Message: "Grace period expired or malformed."}
 	}
 
 	return &GraceCacheResult{IsValid: true, Message: "Valid.", Payload: &payload}
 }
 
-// ActivateOffline verifies an offline token, checks it was issued for this device, and — on
-// success — persists the verified payload to local disk so ValidateOffline can be called
-// later without needing the original token again.
-func ActivateOffline(token string, publicKeyBase64Spki string, deviceID string) *OfflineTokenResult {
-	result := VerifyOfflineToken(token, publicKeyBase64Spki)
-	if !result.IsValid || result.Payload == nil {
-		return result
-	}
-
-	if !strings.EqualFold(result.Payload.DeviceID, deviceID) {
-		return &OfflineTokenResult{
-			IsValid: false,
-			Message: "Token was issued for a different device.",
-			Payload: result.Payload,
+// ActivateOffline verifies configured trust and persists only the original signed token.
+// Pass empty device/product IDs to use the configured device and omit product pinning.
+func (c *Client) ActivateOffline(token, deviceID, expectedProductID string) *OfflineTokenResult {
+	id := c.effectiveDeviceID(deviceID)
+	result := c.trustedOfflineToken(token, id, expectedProductID)
+	if result.IsValid && c.enableCache {
+		if data, err := json.Marshal(cacheEntry{Token: token}); err == nil && os.MkdirAll(c.cacheDirectory, 0700) == nil {
+			_ = os.WriteFile(c.offlinePath(id), data, 0600)
 		}
 	}
-
-	_ = saveOfflineCache(deviceID, result.Payload) // cache failure must never block a successful verification
 	return result
 }
 
-// ValidateOffline reads the locally persisted offline-activation result (from a prior
-// ActivateOffline call) and checks it's still within its validity window. No network call,
-// no token needed — call this on every app launch once already offline-activated.
-func ValidateOffline(deviceID string) *OfflineTokenResult {
-	payload, err := loadOfflineCache(deviceID)
-	if err != nil || payload == nil {
-		return &OfflineTokenResult{IsValid: false, Message: "No local offline activation found."}
+// ValidateOffline re-verifies the original signed token on every read.
+func (c *Client) ValidateOffline(deviceID, expectedProductID string) *OfflineTokenResult {
+	if !c.enableCache {
+		return &OfflineTokenResult{Message: "Offline caching is disabled."}
 	}
-
-	if !strings.EqualFold(payload.DeviceID, deviceID) {
-		return &OfflineTokenResult{IsValid: false, Message: "Device mismatch.", Payload: payload}
+	id := c.effectiveDeviceID(deviceID)
+	data, err := os.ReadFile(c.offlinePath(id))
+	var entry cacheEntry
+	if err != nil || json.Unmarshal(data, &entry) != nil {
+		return &OfflineTokenResult{Message: "No signed token found."}
 	}
-
-	if payload.ExpiresAt != "" {
-		if expiry, err := time.Parse(time.RFC3339, payload.ExpiresAt); err == nil && expiry.Before(time.Now().UTC()) {
-			return &OfflineTokenResult{IsValid: false, Message: "Offline activation expired.", Payload: payload}
+	return c.trustedOfflineToken(entry.Token, id, expectedProductID)
+}
+func (c *Client) trustedOfflineToken(token, deviceID, productID string) *OfflineTokenResult {
+	for _, pin := range c.trustedPublicKeys {
+		result := VerifyOfflineToken(token, pin)
+		p := result.Payload
+		if result.IsValid && p != nil && p.DeviceID != "" && strings.EqualFold(strings.TrimSpace(p.DeviceID), deviceID) &&
+			(productID == "" || strings.EqualFold(p.ProductID, productID)) {
+			return result
 		}
 	}
-
-	return &OfflineTokenResult{IsValid: true, Message: "Valid (offline).", Payload: payload}
+	return &OfflineTokenResult{Message: "Offline token trust or context check failed."}
 }
 
 // VerifyOfflineOnline asks the server to verify the token AND check its revocation status.

@@ -14,7 +14,7 @@ type LicenseResult struct {
 	CustomFields         map[string]string `json:"customFields,omitempty"`
 	VendorWarning        string            `json:"vendorWarning,omitempty"`
 	PaymentStatus        string            `json:"paymentStatus,omitempty"`
-	IsInGracePeriod       bool              `json:"isInGracePeriod,omitempty"`
+	IsInGracePeriod      bool              `json:"isInGracePeriod,omitempty"`
 	Features             []string          `json:"features,omitempty"`
 	IsTrial              bool              `json:"isTrial,omitempty"`
 	TrialDaysRemaining   *int              `json:"trialDaysRemaining,omitempty"`
@@ -52,6 +52,7 @@ func (r *LicenseResult) HasFeature(feature string) bool {
 
 // FloatingSession is returned by Checkout and Heartbeat.
 type FloatingSession struct {
+	ErrorCode    string `json:"errorCode,omitempty"`
 	Success      bool   `json:"success"`
 	SessionToken string `json:"sessionToken,omitempty"`
 	ExpiresAt    string `json:"expiresAt,omitempty"`
@@ -60,6 +61,7 @@ type FloatingSession struct {
 
 // OfflineTokenPayload is the decoded payload of a pc_offline_v1 offline activation token.
 type OfflineTokenPayload struct {
+	ProductID  string `json:"productId"`
 	Version    int    `json:"version"`
 	TokenID    string `json:"tokenId"`
 	TenantSlug string `json:"tenantSlug"`
@@ -89,6 +91,10 @@ type OfflineTokenResult struct {
 
 // GraceCachePayload is the decoded, verified payload of a pc_grace_v1 offline grace-cache token.
 type GraceCachePayload struct {
+	ProductID            string   `json:"productId"`
+	LicenseKeySHA256     string   `json:"licenseKeySha256"`
+	DeviceActivated      *bool    `json:"deviceActivated"`
+	NodeLocked           *bool    `json:"nodeLocked"`
 	Version              int      `json:"version"`
 	TenantSlug           string   `json:"tenantSlug"`
 	Kid                  *string  `json:"kid"`

@@ -18,33 +18,47 @@ package permitcore
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
-// Version is this SDK release; module releases also use the matching v1.2.0 git tag.
-const Version = "1.2.0"
+// Version is this SDK release; module releases also use the matching v2.1.1 git tag.
+const Version = "2.1.1"
 
 const userAgent = "PermitCore-Go/1.0"
 
 // Client is the official PermitCore Go SDK client. Safe for concurrent use — it holds no
 // mutable state beyond the http.Client and the immutable options it was constructed with.
 type Client struct {
-	baseURL     string
-	httpClient  *http.Client
-	enableCache bool
+	baseURL           string
+	httpClient        *http.Client
+	enableCache       bool
+	trustedPublicKeys []string
+	cacheDirectory    string
+	deviceID          string
+	maxRetries        int
 }
 
 // Options configures New. Zero value is the documented default: offline disk caching
-// enabled, 5 second HTTP timeout.
+// enabled, 10 second HTTP timeout and two additional safe attempts.
 type Options struct {
+	TrustedPublicKeys []string
+	CacheDirectory    string
+	DeviceID          string
 	// EnableOfflineCache caches a signed grace-cache token to local disk so Validate/Activate
 	// can fall back to a cryptographically-verified last-known-good result when the server is
 	// unreachable. Defaults to true (pass Options{EnableOfflineCache: false} to disable).
 	DisableOfflineCache bool
-	// Timeout is the HTTP request timeout. Defaults to 5 seconds when zero.
+	// Timeout is the transport timeout per attempt. Defaults to 10 seconds when zero.
 	Timeout time.Duration
+	// MaxRetries is optional: nil means two; a pointer to zero disables retries (range 0–5).
+	MaxRetries *int
 }
 
 // New creates a PermitCoreClient for the given API base URL, e.g. "https://api.permitcore.dev".
@@ -54,13 +68,30 @@ func New(baseURL string, opts ...Options) *Client {
 		o = opts[0]
 	}
 	timeout := o.Timeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
+	if timeout < 0 {
+		panic("Timeout must not be negative")
+	}
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	retries := 2
+	if o.MaxRetries != nil {
+		retries = *o.MaxRetries
+	}
+	if retries < 0 || retries > 5 {
+		panic("MaxRetries must be between 0 and 5")
+	}
+	if o.CacheDirectory == "" {
+		o.CacheDirectory = homeDirOrTemp()
 	}
 	return &Client{
-		baseURL:     strings.TrimRight(baseURL, "/"),
-		httpClient:  &http.Client{Timeout: timeout},
-		enableCache: !o.DisableOfflineCache,
+		baseURL:           strings.TrimRight(baseURL, "/"),
+		httpClient:        &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		enableCache:       !o.DisableOfflineCache,
+		trustedPublicKeys: append([]string(nil), o.TrustedPublicKeys...),
+		cacheDirectory:    o.CacheDirectory,
+		deviceID:          o.DeviceID,
+		maxRetries:        retries,
 	}
 }
 
@@ -71,6 +102,9 @@ func New(baseURL string, opts ...Options) *Client {
 // unreachable, as long as the license has an offline grace period configured.
 func (c *Client) Validate(licenseKey string, version string, expectedProductID string) *LicenseResult {
 	body := map[string]string{"licenseKey": licenseKey}
+	if c.enableCache && len(c.trustedPublicKeys) > 0 {
+		body["deviceId"] = c.effectiveDeviceID("")
+	}
 	if version != "" {
 		body["version"] = version
 	}
@@ -80,14 +114,17 @@ func (c *Client) Validate(licenseKey string, version string, expectedProductID s
 
 	var result LicenseResult
 	if err := c.post("api/v1/validate", body, &result); err != nil {
-		if cached := c.loadCache(licenseKey); cached != nil {
+		if rejected := rejectedLicense(err); rejected != nil {
+			return rejected
+		}
+		if cached := c.loadCache(licenseKey, c.effectiveDeviceID(""), expectedProductID, false); cached != nil {
 			return cached
 		}
-		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true}
+		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true, ErrorCode: "RequestFailed"}
 	}
 
 	if result.IsValid {
-		c.saveCache(licenseKey, &result)
+		c.saveCache(licenseKey, &result, c.effectiveDeviceID(""), expectedProductID, false)
 	}
 	return &result
 }
@@ -97,24 +134,27 @@ func (c *Client) Validate(licenseKey string, version string, expectedProductID s
 // version is optional, same meaning as Validate's. expectedProductID is optional (pass "" to
 // omit) — lets the server reject the key if it doesn't belong to this product.
 func (c *Client) Activate(licenseKey string, deviceID string, deviceName string, version string, expectedProductID string) *LicenseResult {
-	hwid := deviceID
-	if hwid == "" {
-		hwid = GetHardwareID()
-	}
+	hwid := c.effectiveDeviceID(deviceID)
 
 	var nonceResp struct {
 		Nonce string `json:"nonce"`
 	}
 	if err := c.get("api/v1/nonce", &nonceResp); err != nil {
-		if cached := c.loadCache(licenseKey); cached != nil {
+		if rejected := rejectedLicense(err); rejected != nil {
+			return rejected
+		}
+		if cached := c.loadCache(licenseKey, hwid, expectedProductID, true); cached != nil {
 			// [S-Continuity] A device that already activated successfully before (e.g. an app
 			// that re-runs Activate on every launch, or a reinstall that kept the cache file)
 			// falls back to that cached result instead of failing outright.
 			return cached
 		}
-		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true}
+		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true, ErrorCode: "RequestFailed"}
 	}
 
+	if strings.TrimSpace(nonceResp.Nonce) == "" {
+		return &LicenseResult{ErrorCode: "InvalidResponse", Message: "Invalid nonce response."}
+	}
 	body := map[string]string{"licenseKey": licenseKey, "deviceId": hwid, "nonce": nonceResp.Nonce}
 	if deviceName != "" {
 		body["deviceName"] = deviceName
@@ -128,14 +168,17 @@ func (c *Client) Activate(licenseKey string, deviceID string, deviceName string,
 
 	var result LicenseResult
 	if err := c.post("api/v1/activate", body, &result); err != nil {
-		if cached := c.loadCache(licenseKey); cached != nil {
+		if rejected := rejectedLicense(err); rejected != nil {
+			return rejected
+		}
+		if cached := c.loadCache(licenseKey, hwid, expectedProductID, true); cached != nil {
 			return cached
 		}
-		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true}
+		return &LicenseResult{IsValid: false, Message: "Cannot reach license server.", IsOffline: true, ErrorCode: "RequestFailed"}
 	}
 
 	if result.IsValid {
-		c.saveCache(licenseKey, &result)
+		c.saveCache(licenseKey, &result, hwid, expectedProductID, true)
 	}
 	return &result
 }
@@ -163,39 +206,86 @@ func (c *Client) Meter(licenseKey string, eventName string, quantity int, meta m
 
 // Checkout checks out a concurrent seat for a floating license. deviceID defaults to
 // GetHardwareID() when empty.
-func (c *Client) Checkout(licenseKey string, deviceID string, deviceName string) *FloatingSession {
-	hwid := deviceID
-	if hwid == "" {
-		hwid = GetHardwareID()
+// Deactivate confirms HTTP 204. Protected portal policy is never bypassed.
+func (c *Client) Deactivate(tenantSlug, licenseKey, activationID string) bool {
+	_ = os.Remove(c.cachePath(licenseKey))
+	var ack noContentResult
+	if err := c.post("api/v1/portal/"+url.PathEscape(tenantSlug)+"/deactivate",
+		map[string]string{"licenseKey": licenseKey, "activationId": activationID}, &ack); err != nil {
+		return false
 	}
-	body := map[string]string{"licenseKey": licenseKey, "deviceId": hwid}
+	return ack.confirmed
+}
+
+func (c *Client) Checkout(licenseKey string, deviceID string, deviceName string) *FloatingSession {
+	if deviceID == "" {
+		deviceID = GetHardwareID()
+	}
+	body := map[string]string{"licenseKey": licenseKey, "deviceId": deviceID}
 	if deviceName != "" {
 		body["deviceName"] = deviceName
 	}
-
-	var session FloatingSession
-	if err := c.post("api/v1/float/checkout", body, &session); err != nil {
-		return &FloatingSession{Success: false, Message: "Cannot reach license server."}
-	}
-	return &session
+	return c.floatingRequest("checkout", body)
 }
 
-// Heartbeat keeps a floating session alive. Call every 4-5 minutes.
 func (c *Client) Heartbeat(sessionToken string) *FloatingSession {
-	// [S-Float] Session token in the POST body — never the URL path — matches
-	// FloatingController.Heartbeat's FloatingTokenRequest exactly.
-	var session FloatingSession
-	if err := c.post("api/v1/float/heartbeat", map[string]string{"sessionToken": sessionToken}, &session); err != nil {
-		return &FloatingSession{Success: false, Message: "Cannot reach license server."}
+	return c.floatingRequest("heartbeat", map[string]string{"sessionToken": sessionToken})
+}
+
+func (c *Client) floatingRequest(operation string, body any) *FloatingSession {
+	failure := func() *FloatingSession {
+		return &FloatingSession{ErrorCode: "RequestFailed", Message: "Cannot complete floating request."}
 	}
+	var raw map[string]any
+	if err := c.post("api/v1/float/"+operation, body, &raw); err != nil {
+		return failure()
+	}
+	success, ok := raw["success"].(bool)
+	if !ok {
+		return failure()
+	}
+	for _, field := range []string{"sessionToken", "expiresAt", "message", "errorCode"} {
+		if value := raw[field]; value != nil {
+			if _, ok := value.(string); !ok {
+				return failure()
+			}
+		}
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return failure()
+	}
+	var session FloatingSession
+	if json.Unmarshal(encoded, &session) != nil {
+		return failure()
+	}
+	if !success {
+		session.SessionToken = ""
+		session.ExpiresAt = ""
+		if session.ErrorCode == "" {
+			session.ErrorCode = "FloatingDenied"
+		}
+		return &session
+	}
+	if strings.TrimSpace(session.SessionToken) == "" || strings.TrimSpace(session.ExpiresAt) == "" {
+		return failure()
+	}
+	session.ErrorCode = ""
 	return &session
 }
 
-// Checkin releases a floating seat. Best-effort — errors are swallowed, matching every other
-// PermitCore SDK's checkin() (a failed release on process exit must never block shutdown).
-func (c *Client) Checkin(sessionToken string) {
-	_ = c.post("api/v1/float/checkin", map[string]string{"sessionToken": sessionToken}, nil)
+type noContentResult struct{ confirmed bool }
+
+func (c *Client) TryCheckin(sessionToken string) bool {
+	var ack noContentResult
+	if err := c.post("api/v1/float/checkin", map[string]string{"sessionToken": sessionToken}, &ack); err != nil {
+		return false
+	}
+	return ack.confirmed
 }
+
+// Best-effort compatibility method; TryCheckin reports confirmed HTTP release.
+func (c *Client) Checkin(sessionToken string) { c.TryCheckin(sessionToken) }
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -223,14 +313,125 @@ func (c *Client) post(path string, body any, out any) error {
 }
 
 func (c *Client) do(req *http.Request, out any) error {
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
+	path := req.URL.EscapedPath()
+	safe := req.Method == http.MethodGet && (strings.HasSuffix(path, "/api/v1/nonce") || strings.HasSuffix(path, "/public-key")) ||
+		req.Method == http.MethodPost && (strings.HasSuffix(path, "/api/v1/validate") || strings.HasSuffix(path, "/api/v1/float/heartbeat"))
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		current := req.Clone(req.Context())
+		if attempt > 0 && req.Body != nil {
+			if req.GetBody == nil {
+				return fmt.Errorf("request body cannot be replayed")
+			}
+			var err error
+			current.Body, err = req.GetBody()
+			if err != nil {
+				return err
+			}
+		}
+		var err error
+		resp, err = c.httpClient.Do(current)
+		if err == nil && resp.StatusCode < 500 {
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+			if err == nil {
+				err = fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+		}
+		if !safe || attempt >= c.maxRetries || req.Context().Err() != nil {
+			return err
+		}
+		delay := 250 * time.Millisecond * time.Duration(1<<attempt)
+		if delay > 2*time.Second {
+			delay = 2 * time.Second
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-req.Context().Done():
+			timer.Stop()
+			return req.Context().Err()
+		}
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 300 && resp.StatusCode < 500 {
+		body, _ := io.ReadAll(resp.Body)
+		return &httpRejection{status: resp.StatusCode, body: body}
+	}
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 
-	if resp.StatusCode == http.StatusNoContent || out == nil {
+	if ack, ok := out.(*noContentResult); ok {
+		ack.confirmed = resp.StatusCode == http.StatusNoContent
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	if out == nil {
+		return nil
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &invalidResponse{}
+	}
+	if result, ok := out.(*LicenseResult); ok {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil || fields == nil {
+			return &invalidResponse{}
+		}
+		var valid bool
+		if field, exists := fields["isValid"]; !exists || string(field) == "null" || json.Unmarshal(field, &valid) != nil {
+			return &invalidResponse{}
+		}
+		if json.Unmarshal(raw, result) != nil {
+			return &invalidResponse{}
+		}
+		result.IsOffline = false
+		if !result.IsValid {
+			result.OfflineCacheToken = ""
+		}
+		return nil
+	}
+	if len(raw) == 0 && resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if json.Unmarshal(raw, out) != nil {
+		return &invalidResponse{}
+	}
+	return nil
+}
+
+type invalidResponse struct{}
+
+func (*invalidResponse) Error() string { return "Invalid response from server." }
+
+type httpRejection struct {
+	status int
+	body   []byte
+}
+
+func (e *httpRejection) Error() string { return fmt.Sprintf("HTTP %d.", e.status) }
+
+func rejectedLicense(err error) *LicenseResult {
+	var invalid *invalidResponse
+	if errors.As(err, &invalid) {
+		return &LicenseResult{ErrorCode: "InvalidResponse", Message: invalid.Error()}
+	}
+	var rejection *httpRejection
+	if !errors.As(err, &rejection) {
+		return nil
+	}
+	var result LicenseResult
+	_ = json.Unmarshal(rejection.body, &result)
+	result.IsValid = false
+	result.IsOffline = false
+	result.OfflineCacheToken = ""
+	if result.ErrorCode == "" {
+		result.ErrorCode = "HttpError"
+	}
+	if result.Message == "" {
+		result.Message = rejection.Error()
+	}
+	return &result
 }
