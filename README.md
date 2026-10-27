@@ -1,6 +1,16 @@
 # PermitCore Go SDK
 
+Language reference: [installation, requirements and SDK usage](https://permitcore.dev/docs/sdks/go).
+This guide and the public reference describe SDK 2.1.1; check the platform requirements before choosing a build target.
+
 Official Go client for [PermitCore](https://permitcore.dev) license management.
+
+**License:** [MIT](LICENSE), copyright permitcore. Include the license notice when redistributing
+the Go SDK. The grant covers this Go SDK source, including the unchanged 2.1.1 source; it does
+not license the hosted service or backend. Previously published Go module archives are immutable
+and have not been repacked or retagged. For an older archive without the notice file, retain
+the [repository license](https://github.com/permitCore-spec/permitcore-sdk-go/blob/main/LICENSE).
+This licensing/documentation update changes no Go code, dependencies, behavior or package version.
 
 **Requirements:** Go 1.21+, zero dependencies — everything is standard library
 (`net/http`, `crypto/ecdsa`, `encoding/json`).
@@ -265,7 +275,7 @@ Website activation reporting is isolated to production background jobs. An analy
 outage does not change a successful SDK license-validation response.
 
 Project website: [PermitCore](https://permitcore.dev/) — public directory links, including
-LaunchNest and ToolFame, are in its footer. [API and SDK documentation](https://permitcore.dev/docs).
+ToolFame, are in its footer. [API and SDK documentation](https://permitcore.dev/docs).
 
 
 Paddle credit-only subscription updates do not create or renew licenses or clear payment debt.
@@ -363,3 +373,46 @@ session. SDK 2.1.1 accompanies the tenant-scoped API verification repair. Tracke
 tokens and compromised signing keys are rejected; valid vendor self-issued tokens need no
 server record. Offline signature checks cannot discover later server revocation until the
 application reconnects, and retain the signed expiry deadline.
+
+### Floating lease authority
+
+Use the returned `expiresAt` deadline (mapped to your language's result property), not a fixed
+fifteen-minute timer. Checkout and heartbeat require the server. A grant is bounded by the
+current license access deadline, including applicable post-expiry/Store payment grace and any
+earlier entitlement end. Denied renewal grants no new authorization; stop protected work on a
+failed renewal or expired lease. Revocation is checked on server requests, not pushed instantly.
+Offline validation does not renew a floating seat. Coordinate processes that share a device ID,
+and await confirmed checkin after work stops. See the [floating integration reference](https://permitcore.dev/docs/floating-licenses).
+
+### Vendor signing-key recovery
+
+Every plan, including Free, lets the tenant's CompanyAdmin export its own signing key in
+Admin → Settings → Security → Business Continuity. This sensitive operation requires an Admin
+session; an API key cannot export private signing material. Keep private keys in the vendor's
+protected recovery system and give customer applications only independently trusted public keys.
+Existing signed deadlines still apply. Export does not enable paid hosted offline activation,
+change this SDK's verification rules, or deploy an independent issuer. Test recovery separately.
+
+Account-data ZIP exports also include encrypted license inventory, IVs and the tenant encryption salt.
+Keep your passphrase separately. The ZIP is a selected export, not a complete service backup;
+version 2 also includes customer/Store/payment records, usage, access configuration and public key history.
+Original asset files, raw provider records and private signing keys still need separate recovery steps. See the
+[exit plan](https://permitcore.dev/exit-plan) and test your migration independently.
+
+
+Encryption/access boundary: the default Admin creation flow uses browser/passphrase encryption;
+this SDK sends plaintext license keys over HTTPS for validation/activation. Store delivery and
+optional escrow use server-managed access, including audited SuperAdmin escrow recovery. Native
+browser crypto does not remove browser/deployment trust. Account exports can contain `store-order:`
+references instead of decryptable Store keys; preserve delivered keys and matching recovery material.
+Read the [workflow/access reference](https://permitcore.dev/docs/security#data-protection-promise).
+SDK runtime, verification rules and package version are unchanged by this documentation update.
+
+
+Operational scope: the [status page](https://permitcore.dev/status) is a database-connectivity
+probe, not a complete SDK/license/payment flow test. Scheduled encrypted backups and operator
+restore drills do not guarantee full app recovery. See [Security](https://permitcore.dev/security)
+and the repository's `docs/SECURITY_OPERATIONS.md` for retention/reporting boundaries.
+This documentation clarification leaves SDK runtime, wire behavior and package version unchanged.
+
+Documentation QA: install commands must copy literally, without hidden separators or edge email rewrites. See docs/QA_FIXES_2026-10-27.md; this web/help change does not alter SDK runtime, wire contracts or version 2.1.1.
